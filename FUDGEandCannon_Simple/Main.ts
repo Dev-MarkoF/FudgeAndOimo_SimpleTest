@@ -1,8 +1,9 @@
 ///<reference types="./Libraries/FudgeCore.js"/>
-///<reference types="./Libraries/oimo.min.js"/>
+///<reference types="./Libraries/cannon.min.js"/>
 
 namespace FudgePhysics_Communication {
     import f = FudgeCore;
+
     
     window.addEventListener("load", init);
     const app: HTMLCanvasElement = document.querySelector("canvas");
@@ -14,16 +15,7 @@ namespace FudgePhysics_Communication {
     let fpsDisplay: HTMLElement = document.querySelector("h2#FPS");
     let bodies = new Array();
 
-    let world = new OIMO.World({ 
-      timestep: 1 / 60, 
-      iterations: 8, 
-      broadphase: 2, // 1 brute force, 2 sweep and prune, 3 volume tree
-      worldscale: 1, // scale full world 
-      random: true,  // randomize sample
-      info: false,   // calculate statistic or not
-      gravity: [0, -9.8, 0] 
-    });
-
+    let world = new CANNON.World();
 
     function init(_event: Event): void {
       f.Debug.log(app);
@@ -58,10 +50,11 @@ namespace FudgePhysics_Communication {
       cmpCamera.pivot.translate(new f.Vector3(2, 2, 10));
       cmpCamera.pivot.lookAt(f.Vector3.ZERO());
 
-      //Physics OIMO
-      initializePhysicsBody(ground.getComponent(f.ComponentTransform), false, 0);
-      initializePhysicsBody(cmpCubeTransform, true, 1);
-      initializePhysicsBody(cmpCubeTransform2, true, 2);
+      //Physics CANNON
+      world.gravity = new CANNON.Vec3(0, -9.81, 0);
+      initializePhysicsBody(ground.getComponent(f.ComponentTransform), 0, 0);
+      initializePhysicsBody(cmpCubeTransform, 1, 1);
+      initializePhysicsBody(cmpCubeTransform2, 1, 2);
       //EndPhysics
 
       viewPort = new f.Viewport();
@@ -73,12 +66,13 @@ namespace FudgePhysics_Communication {
       f.Loop.start();
     }
 
+
     function update(): void {
       
-      //Physics OIMO
-      world.step();
+      //Physics CANNON
+      world.step(f.Loop.timeFrameGame / 1000);
       applyPhysicsBody(cubes[0].getComponent(f.ComponentTransform), 1);
-      //applyPhysicsBody(cubes[1].getComponent(f.ComponentTransform), 2);
+      applyPhysicsBody(cubes[1].getComponent(f.ComponentTransform), 2);
       //EndPhysics
 
       viewPort.draw();
@@ -110,28 +104,25 @@ namespace FudgePhysics_Communication {
       return node;
   }
 
-    function initializePhysicsBody(_cmpTransform: f.ComponentTransform, dynamic: boolean, no: number) {
+    function initializePhysicsBody(_cmpTransform: f.ComponentTransform, massVal: number, no: number) {
+    let scale: CANNON.Vec3 = new CANNON.Vec3(_cmpTransform.local.scaling.x, _cmpTransform.local.scaling.y, _cmpTransform.local.scaling.z);
+    let pos: CANNON.Vec3 =  new CANNON.Vec3(_cmpTransform.local.translation.x, _cmpTransform.local.translation.y, _cmpTransform.local.translation.z)
 
-    bodies[no] = world.add({ 
-      type: "box", // type of shape : sphere, box, cylinder 
-      size: [_cmpTransform.local.scaling.x, _cmpTransform.local.scaling.y, _cmpTransform.local.scaling.z], // size of shape
-      pos: [_cmpTransform.local.translation.x, _cmpTransform.local.translation.y, _cmpTransform.local.translation.z], // start position in degree
-      rot: [_cmpTransform.local.rotation.x, _cmpTransform.local.rotation.y, _cmpTransform.local.rotation.z], // start rotation in degree
-      move: dynamic, // dynamic or statique
-      density: 1,
-      friction: 0.2,
-      restitution: 0.2,
-      belongsTo: 1, // The bits of the collision groups to which the shape belongs.
-      collidesWith: 0xffffffff // The bits of the collision groups with which the shape collides.
-    });
+    bodies[no] = new CANNON.Body({
+      mass: massVal, // kg
+      position: pos, // m
+      shape: new CANNON.Box(scale)
+   });
+    world.addBody(bodies[no]);
   }
 
-    function applyPhysicsBody(_cmpTransform: f.ComponentTransform, no: number): void {
-      let tmpPosition: f.Vector3 = new f.Vector3(bodies[no].getPosition().x, bodies[no].getPosition().y, bodies[no].getPosition().z);
-  
-      let tmpRotation: f.Vector3; //= makeRotationFromQuaternion(bodies[no].getQuaternion()); //, new f.Vector3(0, 0, 1)); //f.Vector3.ONE(1)); //_cmpTransform.local.rotation);
-      tmpRotation = transformVectorByQuaternion(_cmpTransform.local.rotation, bodies[no].getQuaternion());
 
+    function applyPhysicsBody(_cmpTransform: f.ComponentTransform, no: number): void {
+
+      let tmpPosition: f.Vector3 = new f.Vector3(bodies[no].position.x, bodies[no].position.y, bodies[no].position.z);
+  
+      let tmpRotation: f.Vector3 =  makeRotationFromQuaternion(bodies[no].quaternion); //, new f.Vector3(0, 0, 1)); //f.Vector3.ONE(1)); //_cmpTransform.local.rotation);
+//      tmpRotation = transformVectorByQuaternion(_cmpTransform.local.rotation, bodies[no].quaternion);
 
       let tmpMatrix: f.Matrix4x4 = f.Matrix4x4.TRANSLATION(tmpPosition);
       let tmpRotMatrix: f.Matrix4x4 = new f.Matrix4x4();
@@ -145,8 +136,8 @@ namespace FudgePhysics_Communication {
       _cmpTransform.local.set(tmpMatrix);
       //_cmpTransform.local.rotate(tmpRotation, false);
       
-      //let cmpMesh: f.ComponentMesh = _cmpTransform.getContainer().getComponent(f.ComponentMesh);
-      //cmpMesh.pivot.rotation.set(tmpRotation.x, tmpRotation.y, tmpRotation.z);
+      let cmpMesh: f.ComponentMesh = _cmpTransform.getContainer().getComponent(f.ComponentMesh);
+      cmpMesh.pivot.rotation.set(tmpRotation.x, tmpRotation.y, tmpRotation.z);
       //f.Debug.log(tmpRotation);
     }
 
@@ -170,7 +161,7 @@ namespace FudgePhysics_Communication {
       let siny_cosp: number = 2 * (q.w * q.z + q.x * q.y);
       let cosy_cosp: number = 1 - 2 * (q.y * q.y + q.z * q.z);
       angles.z = Math.atan2(siny_cosp, cosy_cosp);
-
+f.Debug.log(angles);
       return angles;
   }
 
@@ -195,7 +186,7 @@ namespace FudgePhysics_Communication {
               value.x * (1.0 - yy2 - zz2) + value.y * (xy2 - wz2) + value.z * (xz2 + wy2),
               value.x * (xy2 + wz2) + value.y * (1.0 - xx2 - zz2) + value.z * (yz2 - wx2),
               value.x * (xz2 - wy2) + value.y * (yz2 + wx2) + value.z * (1.0 - xx2 - yy2));
-         f.Debug.log(angles);
+      f.Debug.log(angles);
       return angles;
         }
  
