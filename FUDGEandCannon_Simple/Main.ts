@@ -31,9 +31,8 @@ namespace FudgePhysics_Communication {
       cubes[0] = createCompleteMeshNode("Cube_1", new f.Material("Cube", f.ShaderFlat, new f.CoatColored(new f.Color(1, 0 , 0, 1))), new f.MeshCube());
       let cmpCubeTransform: f.ComponentTransform = cubes[0].getComponent(f.ComponentTransform);
       cmpCubeTransform.local.translate(new f.Vector3(0, 2, 0));
-      cmpCubeTransform.local.rotateX(45, true);
+      cmpCubeTransform.local.rotateX(45);
       let cmpCubeMesh: f.ComponentMesh = cubes[0].getComponent(f.ComponentMesh);
-      cmpCubeMesh.pivot.rotateX(45, true);
       hierarchy.appendChild(cubes[0]);
 
       cubes[1] = createCompleteMeshNode("Cube_2", new f.Material("Cube", f.ShaderFlat, new f.CoatColored(new f.Color(1, 0 , 0, 1))), new f.MeshCube());
@@ -72,7 +71,7 @@ namespace FudgePhysics_Communication {
       //Physics CANNON
       world.step(f.Loop.timeFrameGame / 1000);
       applyPhysicsBody(cubes[0].getComponent(f.ComponentTransform), 1);
-      applyPhysicsBody(cubes[1].getComponent(f.ComponentTransform), 2);
+     // applyPhysicsBody(cubes[1].getComponent(f.ComponentTransform), 2);
       //EndPhysics
 
       viewPort.draw();
@@ -105,9 +104,11 @@ namespace FudgePhysics_Communication {
   }
 
     function initializePhysicsBody(_cmpTransform: f.ComponentTransform, massVal: number, no: number) {
-    let scale: CANNON.Vec3 = new CANNON.Vec3(_cmpTransform.local.scaling.x, _cmpTransform.local.scaling.y, _cmpTransform.local.scaling.z);
-    let pos: CANNON.Vec3 =  new CANNON.Vec3(_cmpTransform.local.translation.x, _cmpTransform.local.translation.y, _cmpTransform.local.translation.z)
-
+    let scale: CANNON.Vec3 = new CANNON.Vec3(_cmpTransform.local.scaling.x / 1.5, _cmpTransform.local.scaling.y / 1.5, _cmpTransform.local.scaling.z / 1.5);
+    let pos: CANNON.Vec3 =  new CANNON.Vec3(_cmpTransform.local.translation.x, _cmpTransform.local.translation.y, _cmpTransform.local.translation.z);
+    let rotation: CANNON.Quaternion = new CANNON.Quaternion();
+    rotation.setFromEuler(_cmpTransform.local.rotation.x, _cmpTransform.local.rotation.y, _cmpTransform.local.rotation.z);
+   
     bodies[no] = new CANNON.Body({
       mass: massVal, // kg
       position: pos, // m
@@ -121,24 +122,26 @@ namespace FudgePhysics_Communication {
 
       let tmpPosition: f.Vector3 = new f.Vector3(bodies[no].position.x, bodies[no].position.y, bodies[no].position.z);
   
-      let tmpRotation: f.Vector3 =  makeRotationFromQuaternion(bodies[no].quaternion); //, new f.Vector3(0, 0, 1)); //f.Vector3.ONE(1)); //_cmpTransform.local.rotation);
-//      tmpRotation = transformVectorByQuaternion(_cmpTransform.local.rotation, bodies[no].quaternion);
+      let tmpRotation: f.Vector3; // =  makeRotationFromQuaternion(bodies[no].quaternion); //, new f.Vector3(0, 0, 1)); //f.Vector3.ONE(1)); //_cmpTransform.local.rotation);
+      tmpRotation = transformVectorByQuaternion(_cmpTransform.local.rotation, bodies[no].quaternion);
+      f.Debug.log(tmpRotation);
 
       let tmpMatrix: f.Matrix4x4 = f.Matrix4x4.TRANSLATION(tmpPosition);
       let tmpRotMatrix: f.Matrix4x4 = new f.Matrix4x4();
      // f.Debug.log(tmpRotation.x);
-      tmpRotMatrix.rotateX(tmpRotation.x);
       tmpRotMatrix.rotateY(tmpRotation.y);
+      tmpRotMatrix.rotateX(tmpRotation.x);
       tmpRotMatrix.rotateZ(tmpRotation.z);
      // f.Debug.log(tmpRotMatrix);
       tmpMatrix.multiply(tmpRotMatrix);
 
       _cmpTransform.local.set(tmpMatrix);
-      //_cmpTransform.local.rotate(tmpRotation, false);
+      //_cmpTransform.local.rotate(tmpRotation);
+      //f.Debug.log(_cmpTransform.local.rotation);
       
       let cmpMesh: f.ComponentMesh = _cmpTransform.getContainer().getComponent(f.ComponentMesh);
-      cmpMesh.pivot.rotation.set(tmpRotation.x, tmpRotation.y, tmpRotation.z);
-      //f.Debug.log(tmpRotation);
+      //cmpMesh.pivot.rotate(tmpRotation);
+      //f.Debug.log(cmpMesh.pivot.rotation);
     }
 
   
@@ -161,7 +164,7 @@ namespace FudgePhysics_Communication {
       let siny_cosp: number = 2 * (q.w * q.z + q.x * q.y);
       let cosy_cosp: number = 1 - 2 * (q.y * q.y + q.z * q.z);
       angles.z = Math.atan2(siny_cosp, cosy_cosp);
-f.Debug.log(angles);
+      //f.Debug.log(angles);
       return angles;
   }
 
@@ -186,12 +189,44 @@ f.Debug.log(angles);
               value.x * (1.0 - yy2 - zz2) + value.y * (xy2 - wz2) + value.z * (xz2 + wy2),
               value.x * (xy2 + wz2) + value.y * (1.0 - xx2 - zz2) + value.z * (yz2 - wx2),
               value.x * (xz2 - wy2) + value.y * (yz2 + wx2) + value.z * (1.0 - xx2 - yy2));
-      f.Debug.log(angles);
+      //f.Debug.log(angles);
       return angles;
         }
+
  
     function copysign(a: number, b: number): number {
     return b < 0 ? -Math.abs(a) : Math.abs(a);
   }
+
+    function Vec3ToQuaternion(rotation: f.Vector3): any {
+            //  Roll first, about axis the object is facing, then
+            //  pitch upward, then yaw to face into the new heading
+
+            let yaw: number = rotation.y;
+            let pitch: number = rotation.x;
+            let roll: number = rotation.z;
+            let sr: number, cr: number, sp: number, cp: number, sy: number, cy: number;
+ 
+            let halfRoll: number = roll * 0.5;
+            sr = Math.sin(halfRoll);
+            cr = Math.cos(halfRoll);
+ 
+            let halfPitch: number = pitch * 0.5;
+            sp = Math.sin(halfPitch);
+            cp = Math.cos(halfPitch);
+ 
+            let halfYaw = yaw * 0.5;
+            sy = Math.sin(halfYaw);
+            cy = Math.cos(halfYaw);
+ 
+            let result: any;
+ 
+            result.X = cy * sp * cr + sy * cp * sr;
+            result.Y = sy * cp * cr - cy * sp * sr;
+            result.Z = cy * cp * sr - sy * sp * cr;
+            result.W = cy * cp * cr + sy * sp * sr;
+ 
+            return result;
+        }
 
 }

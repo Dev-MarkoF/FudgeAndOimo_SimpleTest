@@ -378,10 +378,17 @@ declare namespace FudgeCore {
     abstract class Recycler {
         private static depot;
         /**
-         * Returns an object of the requested type from the depot, or a new one, if the depot was empty
+         * Fetches an object of the requested type from the depot, or returns a new one, if the depot was empty
          * @param _T The class identifier of the desired object
          */
         static get<T>(_T: new () => T): T;
+        /**
+         * Returns a reference to an object of the requested type in the depot, but does not remove it there.
+         * If no object of the requested type was in the depot, one is created, stored and borrowed.
+         * For short term usage of objects in a local scope, when there will be no other call to Recycler.get or .borrow!
+         * @param _T The class identifier of the desired object
+         */
+        static borrow<T>(_T: new () => T): T;
         /**
          * Stores the object in the depot for later recycling. Users are responsible for throwing in objects that are about to loose scope and are not referenced by any other
          * @param _instance
@@ -1068,6 +1075,9 @@ declare namespace FudgeCore {
      * @authors Jirka Dell'Oro-Friedl, HFU, 2020 | Jascha Karagöl, HFU, 2019
      */
     abstract class Component extends Mutable implements Serializable {
+        /** refers back to this class from any subclass e.g. in order to find compatible other resources*/
+        static readonly baseClass: typeof Component;
+        /** list of all the subclasses derived from this class, if they registered properly*/
         static readonly subclasses: typeof Component[];
         protected singleton: boolean;
         private container;
@@ -1408,6 +1418,7 @@ declare namespace FudgeCore {
         constructor(_mesh?: Mesh);
         serialize(): Serialization;
         deserialize(_serialization: Serialization): Serializable;
+        getMutatorForUserInterface(): MutatorForUserInterface;
     }
 }
 declare namespace FudgeCore {
@@ -1442,8 +1453,11 @@ declare namespace FudgeCore {
         OUTPUT = "output"
     }
     const enum CONTROL_TYPE {
+        /** The output simply follows the scaled and delayed input */
         PROPORTIONAL = 0,
+        /** The output value changes over time with a rate given by the scaled and delayed input */
         INTEGRAL = 1,
+        /** The output value reacts to changes of the scaled input and drops to 0 with given delay, if input remains constant */
         DIFFERENTIAL = 2
     }
     /**
@@ -1461,52 +1475,56 @@ declare namespace FudgeCore {
         readonly type: CONTROL_TYPE;
         active: boolean;
         name: string;
-        protected valueBase: number;
-        protected inputTarget: number;
+        protected rateDispatchOutput: number;
         protected valuePrevious: number;
-        protected inputPrevious: number;
-        protected timeInputDelay: number;
+        protected outputBase: number;
+        protected outputTarget: number;
+        protected outputPrevious: number;
+        protected outputTargetPrevious: number;
         protected factor: number;
-        protected timeInputTargetSet: number;
         protected time: Time;
+        protected timeValueDelay: number;
+        protected timeOutputTargetSet: number;
+        protected idTimer: number;
         constructor(_name: string, _factor?: number, _type?: CONTROL_TYPE, _active?: boolean);
         /**
          * Set the time-object to be used when calculating the output in [[CONTROL_TYPE.INTEGRAL]]
          */
         setTimebase(_time: Time): void;
         /**
-         * Feed an input value into this control and fire the [[EVENT_CONTROL.INPUT]]-event
+         * Feed an input value into this control and fire the events [[EVENT_CONTROL.INPUT]] and [[EVENT_CONTROL.OUTPUT]]
          */
         setInput(_input: number): void;
         /**
-         * Set the time to take for the internal linear dampening until the input value given with [[setInput]] is reached
+         * Set the time to take for the internal linear dampening until the final ouput value is reached
          */
         setDelay(_time: number): void;
+        /**
+         * Set the number of output-events to dispatch per second.
+         * At the default of 0, the control output must be polled and will only actively dispatched once each time input occurs and the output changes.
+         */
+        setRateDispatchOutput(_rateDispatchOutput?: number): void;
         /**
          * Set the factor to multiply the input value given with [[setInput]] with
          */
         setFactor(_factor: number): void;
         /**
-         * Sets the base value to be applied for the following calculations of value.
-         * Applicable to [[CONTROL_TYPE.INTEGRAL]] and [[CONTROL_TYPE.DIFFERENTIAL]] only.
-         * TODO: check if inputTarget/inputPrevious must be adjusted too
-         */
-        setValue(_value: number): void;
-        /**
          * Get the value from the output of this control
          */
-        getValue(): number;
+        getOutput(): number;
         /**
-         * Get the value from the output of this control
+         * Calculates the output of this control
          */
-        protected calculateValue(): number;
-        private getInputDelayed;
+        protected calculateOutput(): number;
+        private getValueDelayed;
+        private dispatchOutput;
     }
 }
 declare namespace FudgeCore {
     /**
      * Handles multiple controls as inputs and creates an output from that.
      * As a subclass of [[Control]], axis calculates the ouput summing up the inputs and processing the result using its own settings.
+     * Dispatches [[EVENT_CONTROL.OUTPUT]] and [[EVENT_CONTROL.INPUT]] when one of the controls dispatches them.
      * ```plaintext
      *           ┌───────────────────────────────────────────┐
      *           │ ┌───────┐                                 │
@@ -1539,7 +1557,9 @@ declare namespace FudgeCore {
         /**
          * Returns the value of this axis after summing up all inputs and processing the sum according to the axis' settings
          */
-        getValue(): number;
+        getOutput(): number;
+        private hndOutputEvent;
+        private hndInputEvent;
     }
 }
 declare namespace FudgeCore {
@@ -2198,7 +2218,7 @@ declare namespace FudgeCore {
     }
     /**
      * Framing describes how to map a rectangle into a given frame
-     * and how points in the frame correspond to points in the resulting rectangle
+     * and how points in the frame correspond to points in the resulting rectangle and vice versa
      */
     abstract class Framing extends Mutable {
         /**
@@ -2728,6 +2748,9 @@ declare namespace FudgeCore {
      * @authors Jirka Dell'Oro-Friedl, HFU, 2019
      */
     abstract class Mesh implements SerializableResource {
+        /** refers back to this class from any subclass e.g. in order to find compatible other resources*/
+        static readonly baseClass: typeof Mesh;
+        /** list of all the subclasses derived from this class, if they registered properly*/
         static readonly subclasses: typeof Mesh[];
         vertices: Float32Array;
         indices: Uint16Array;
@@ -2736,7 +2759,7 @@ declare namespace FudgeCore {
         idResource: string;
         renderBuffers: RenderBuffers;
         static getBufferSpecification(): BufferSpecification;
-        protected static registerSubclass(_subclass: typeof Mesh): number;
+        protected static registerSubclass(_subClass: typeof Mesh): number;
         useRenderBuffers(_shader: typeof Shader, _world: Matrix4x4, _projection: Matrix4x4, _id?: number): void;
         createRenderBuffers(): void;
         deleteRenderBuffers(_shader: typeof Shader): void;
@@ -3139,6 +3162,9 @@ declare namespace FudgeCore {
      * @authors Jascha Karagöl, HFU, 2019 | Jirka Dell'Oro-Friedl, HFU, 2019
      */
     abstract class Shader {
+        /** refers back to this class from any subclass e.g. in order to find compatible other resources*/
+        static readonly baseClass: typeof Shader;
+        /** list of all the subclasses derived from this class, if they registered properly*/
         static readonly subclasses: typeof Shader[];
         static program: WebGLProgram;
         static attributes: {
@@ -3395,6 +3421,10 @@ declare namespace FudgeCore {
          * Deletes the timer with the id given by this time object
          */
         deleteTimer(_id: number): void;
+        /**
+         * Returns a reference to the timer with the given id or null if not found.
+         */
+        getTimer(_id: number): Timer;
         /**
          * Returns a copy of the list of timers currently installed on this time object
          */
